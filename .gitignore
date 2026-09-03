@@ -1,0 +1,9 @@
+/*
+!/.gitignore
+!/LICENSE
+!/README.md
+!/Formula/
+!/.github/
+
+# Artifacts exclusion
+.DS_Store
