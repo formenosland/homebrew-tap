@@ -19,6 +19,18 @@ class Skillsync < Formula
     bin.install_symlink libexec/"bin/skillsync"
   end
 
+  def caveats
+    <<~EOS
+      Link agent views once:
+        skillsync init
+      brew uninstall skillsync removes only the CLI.
+      It does not unlink agents or delete the skills store, config, or other
+      library files under ~/.local/share/skillsync.
+      To unlink agents: skillsync uninstall
+      To erase store/config: skillsync uninstall --purge
+    EOS
+  end
+
   test do
     assert_match version.to_s, shell_output("#{bin}/skillsync --version")
   end
