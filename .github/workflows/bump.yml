@@ -109,13 +109,17 @@ jobs:
             exit 1
           fi
 
+          brew tap formenosland/tap "${GITHUB_WORKSPACE}"
+          brew trust formenosland/tap
+          qualified="formenosland/tap/${NAME}"
+
           cmd=(brew)
           if [[ "${KIND}" == formula ]]; then
             cmd+=(bump-formula-pr)
           else
             cmd+=(bump-cask-pr)
           fi
-          cmd+=(--no-fork --no-browse "--url=${URL}" "--sha256=${SHA256}" "--version=${VERSION}" "${NAME}")
+          cmd+=(--no-fork --no-browse "--url=${URL}" "--sha256=${SHA256}" "--version=${VERSION}" "${qualified}")
 
           log="$(mktemp)"
           "${cmd[@]}" 2>&1 | tee "${log}"
@@ -125,7 +129,7 @@ jobs:
           if [[ -n "${pr_url}" ]]; then
             pr="${pr_url##*/}"
           else
-            branch="$(git rev-parse --abbrev-ref HEAD)"
+            branch="$(git -C "$(brew --repository formenosland/tap)" rev-parse --abbrev-ref HEAD)"
             if [[ "${branch}" != main && "${branch}" != HEAD ]]; then
               pr="$(gh pr list --repo "${TAP_REPO}" --head "${branch}" --state open --json number --jq '.[0].number // empty')"
             fi
