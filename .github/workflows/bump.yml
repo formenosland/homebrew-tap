@@ -64,11 +64,13 @@ jobs:
           APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
         run: |
           echo "::add-mask::${TOKEN}"
-          echo "GH_TOKEN=${TOKEN}" >>"${GITHUB_ENV}"
-          echo "GH_REPO=${TAP_REPO}" >>"${GITHUB_ENV}"
-          echo "HOMEBREW_NO_COLOR=1" >>"${GITHUB_ENV}"
-          echo "HOMEBREW_GIT_NAME=${APP_SLUG}[bot]" >>"${GITHUB_ENV}"
-          echo "HOMEBREW_GIT_EMAIL=${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com" >>"${GITHUB_ENV}"
+          {
+            echo "GH_TOKEN=${TOKEN}"
+            echo "GH_REPO=${TAP_REPO}"
+            echo "HOMEBREW_NO_COLOR=1"
+            echo "HOMEBREW_GIT_NAME=${APP_SLUG}[bot]"
+            echo "HOMEBREW_GIT_EMAIL=${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+          } >>"${GITHUB_ENV}"
           git config --global user.name "${APP_SLUG}[bot]"
           git config --global user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
