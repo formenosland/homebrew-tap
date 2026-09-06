@@ -64,7 +64,6 @@ jobs:
           APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
         run: |
           echo "::add-mask::${TOKEN}"
-          echo "HOMEBREW_GITHUB_API_TOKEN=${TOKEN}" >>"${GITHUB_ENV}"
           echo "GH_TOKEN=${TOKEN}" >>"${GITHUB_ENV}"
           echo "GH_REPO=${TAP_REPO}" >>"${GITHUB_ENV}"
           echo "HOMEBREW_NO_COLOR=1" >>"${GITHUB_ENV}"
@@ -111,45 +110,38 @@ jobs:
 
           brew tap formenosland/tap "${GITHUB_WORKSPACE}"
           brew trust formenosland/tap
+          tap_path="$(brew --repository formenosland/tap)"
+          git -C "${tap_path}" remote set-url origin "https://github.com/${TAP_REPO}.git"
           qualified="formenosland/tap/${NAME}"
+          branch="bump-${NAME}-${VERSION}"
 
           cmd=(brew)
           if [[ "${KIND}" == formula ]]; then
             cmd+=(bump-formula-pr)
+            pkg="${tap_path}/Formula/${NAME}.rb"
           else
             cmd+=(bump-cask-pr)
+            pkg="${tap_path}/Casks/${NAME}.rb"
           fi
-          cmd+=(--no-fork --no-browse "--url=${URL}" "--sha256=${SHA256}")
-          # URL tag tarballs already encode the version; --version writes a redundant
-          # `version` stanza and `brew audit` fails (version_scan).
+          # --write-only: edit the formula here. brew bump-*-pr then tries GitHub
+          # with HOMEBREW_GITHUB_API_TOKEN, which rejects GitHub App tokens
+          # (no classic `repo` scope) and, after a path tap, targets skillsync/skillsync.
+          cmd+=(--write-only --no-browse "--url=${URL}" "--sha256=${SHA256}")
           if [[ "${URL}" != *"${VERSION}"* ]]; then
             cmd+=("--version=${VERSION}")
           fi
           cmd+=("${qualified}")
+          "${cmd[@]}"
 
-          log="$(mktemp)"
-          "${cmd[@]}" 2>&1 | tee "${log}"
+          git -C "${tap_path}" checkout -B "${branch}"
+          git -C "${tap_path}" add "${pkg}"
+          git -C "${tap_path}" commit --no-edit --message "${NAME} ${VERSION}" -- "${pkg}"
+          git -C "${tap_path}" push --set-upstream origin "${branch}"
 
-          pr=""
-          pr_url="$(grep -Eo "https://github.com/${TAP_REPO}/pull/[0-9]+" "${log}" | tail -n1 || true)"
-          if [[ -n "${pr_url}" ]]; then
-            pr="${pr_url##*/}"
-          else
-            branch="$(git -C "$(brew --repository formenosland/tap)" rev-parse --abbrev-ref HEAD)"
-            if [[ "${branch}" != main && "${branch}" != HEAD ]]; then
-              pr="$(gh pr list --repo "${TAP_REPO}" --head "${branch}" --state open --json number --jq '.[0].number // empty')"
-            fi
-          fi
-          if [[ -z "${pr}" ]]; then
-            pr="$(gh pr list --repo "${TAP_REPO}" --state open --search "${NAME} ${VERSION}" --json number --jq '.[0].number // empty')"
-          fi
-          if [[ -z "${pr}" ]]; then
-            echo "Could not find the bump pull request" >&2
-            gh pr list --repo "${TAP_REPO}" --state open >&2 || true
-            exit 1
-          fi
+          pr_url="$(gh pr create --repo "${TAP_REPO}" --base main --head "${branch}" --title "${NAME} ${VERSION}" --body "Created with \`brew ${cmd[1]}\`.")"
+          pr="${pr_url##*/}"
           echo "pr=${pr}" >>"${GITHUB_OUTPUT}"
-          echo "Opened https://github.com/${TAP_REPO}/pull/${pr}"
+          echo "Opened ${pr_url}"
 
       - name: Wait for CI and squash-merge
         env:
