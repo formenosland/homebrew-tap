@@ -119,7 +119,13 @@ jobs:
           else
             cmd+=(bump-cask-pr)
           fi
-          cmd+=(--no-fork --no-browse "--url=${URL}" "--sha256=${SHA256}" "--version=${VERSION}" "${qualified}")
+          cmd+=(--no-fork --no-browse "--url=${URL}" "--sha256=${SHA256}")
+          # URL tag tarballs already encode the version; --version writes a redundant
+          # `version` stanza and `brew audit` fails (version_scan).
+          if [[ "${URL}" != *"${VERSION}"* ]]; then
+            cmd+=("--version=${VERSION}")
+          fi
+          cmd+=("${qualified}")
 
           log="$(mktemp)"
           "${cmd[@]}" 2>&1 | tee "${log}"
