@@ -1,0 +1,199 @@
+name: bump
+
+on:
+  workflow_call:
+    inputs:
+      kind:
+        description: formula or cask
+        required: true
+        type: string
+      name:
+        description: Formula or cask name in this tap
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      url:
+        required: true
+        type: string
+      sha256:
+        required: true
+        type: string
+      url_arm64:
+        description: Unused until brew bump-cask-pr accepts a second URL; setting this fails the job
+        required: false
+        type: string
+        default: ""
+      sha256_arm64:
+        description: Unused until brew bump-cask-pr accepts a second checksum; setting this fails the job
+        required: false
+        type: string
+        default: ""
+    secrets:
+      HOMEBREW_TAP_APP_ID:
+        required: true
+      HOMEBREW_TAP_APP_PRIVATE_KEY:
+        required: true
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      TAP_REPO: formenosland/homebrew-tap
+    steps:
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: formenosland
+          repositories: homebrew-tap
+
+      - name: Configure git and gh to use the App token
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+        run: |
+          echo "::add-mask::${TOKEN}"
+          {
+            echo "GH_TOKEN=${TOKEN}"
+            echo "GH_REPO=${TAP_REPO}"
+            echo "HOMEBREW_NO_COLOR=1"
+            echo "HOMEBREW_GIT_NAME=${APP_SLUG}[bot]"
+            echo "HOMEBREW_GIT_EMAIL=${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+          } >>"${GITHUB_ENV}"
+          git config --global user.name "${APP_SLUG}[bot]"
+          git config --global user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+      - name: Check out tap
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          repository: formenosland/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: true
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@a657b8b0cd35d0f65cce41fce9b24cf054b49869 # 2026.08.24.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Open bump PR
+        id: bump
+        env:
+          KIND: ${{ inputs.kind }}
+          NAME: ${{ inputs.name }}
+          VERSION: ${{ inputs.version }}
+          URL: ${{ inputs.url }}
+          SHA256: ${{ inputs.sha256 }}
+          URL_ARM64: ${{ inputs.url_arm64 }}
+          SHA256_ARM64: ${{ inputs.sha256_arm64 }}
+        run: |
+          case "${KIND}" in
+            formula|cask) ;;
+            *)
+              echo "kind must be formula or cask, got: ${KIND}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ -n "${URL_ARM64}" || -n "${SHA256_ARM64}" ]]; then
+            echo "url_arm64/sha256_arm64 are set, but brew bump-cask-pr only accepts a single --url/--sha256. Refusing to drop arch URLs." >&2
+            exit 1
+          fi
+
+          brew tap formenosland/tap "${GITHUB_WORKSPACE}"
+          brew trust formenosland/tap
+          tap_path="$(brew --repository formenosland/tap)"
+          git -C "${tap_path}" remote set-url origin "https://github.com/${TAP_REPO}.git"
+          qualified="formenosland/tap/${NAME}"
+          branch="bump-${NAME}-${VERSION}"
+
+          cmd=(brew)
+          if [[ "${KIND}" == formula ]]; then
+            cmd+=(bump-formula-pr)
+            pkg="${tap_path}/Formula/${NAME}.rb"
+          else
+            cmd+=(bump-cask-pr)
+            pkg="${tap_path}/Casks/${NAME}.rb"
+          fi
+          # --write-only: edit the formula here. brew bump-*-pr then tries GitHub
+          # with HOMEBREW_GITHUB_API_TOKEN, which rejects GitHub App tokens
+          # (no classic `repo` scope) and, after a path tap, targets skillsync/skillsync.
+          cmd+=(--write-only --no-browse "--url=${URL}" "--sha256=${SHA256}")
+          if [[ "${URL}" != *"${VERSION}"* ]]; then
+            cmd+=("--version=${VERSION}")
+          fi
+          cmd+=("${qualified}")
+          "${cmd[@]}"
+
+          git -C "${tap_path}" checkout -B "${branch}"
+          git -C "${tap_path}" add "${pkg}"
+          git -C "${tap_path}" commit --no-edit --message "${NAME} ${VERSION}" -- "${pkg}"
+          git -C "${tap_path}" push --set-upstream origin "${branch}"
+
+          pr_url="$(gh pr create --repo "${TAP_REPO}" --base main --head "${branch}" --title "${NAME} ${VERSION}" --body "Created with \`brew ${cmd[1]}\`.")"
+          pr="${pr_url##*/}"
+          echo "pr=${pr}" >>"${GITHUB_OUTPUT}"
+          echo "Opened ${pr_url}"
+
+      - name: Wait for CI and squash-merge
+        env:
+          PR: ${{ steps.bump.outputs.pr }}
+        run: |
+          repo="${TAP_REPO}"
+          deadline=$((SECONDS + 2700))
+
+          echo "Waiting for checks to appear on PR ${PR}…"
+          while true; do
+            state="$(gh pr view "${PR}" --repo "${repo}" --json state --jq .state)"
+            case "${state}" in
+              MERGED)
+                echo "PR ${PR} is MERGED"
+                exit 0
+                ;;
+              CLOSED)
+                echo "PR ${PR} closed without merge" >&2
+                exit 1
+                ;;
+            esac
+            count="$(gh pr view "${PR}" --repo "${repo}" --json statusCheckRollup --jq '.statusCheckRollup | length')"
+            if [[ "${count}" -gt 0 ]]; then
+              break
+            fi
+            if ((SECONDS >= deadline)); then
+              echo "timed out waiting for CI to start on PR ${PR}" >&2
+              gh pr view "${PR}" --repo "${repo}" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          if ! gh pr checks "${PR}" --repo "${repo}" --watch --fail-fast; then
+            state="$(gh pr view "${PR}" --repo "${repo}" --json state --jq .state)"
+            if [[ "${state}" == MERGED ]]; then
+              echo "PR ${PR} is MERGED"
+              exit 0
+            fi
+            echo "checks failed for PR ${PR}" >&2
+            gh pr checks "${PR}" --repo "${repo}" >&2 || true
+            exit 1
+          fi
+
+          gh pr merge "${PR}" --repo "${repo}" --squash --delete-branch
+
+          state="$(gh pr view "${PR}" --repo "${repo}" --json state --jq .state)"
+          if [[ "${state}" != MERGED ]]; then
+            echo "PR ${PR} did not merge (state=${state})" >&2
+            gh pr view "${PR}" --repo "${repo}" >&2
+            exit 1
+          fi
+          echo "PR ${PR} is MERGED"
