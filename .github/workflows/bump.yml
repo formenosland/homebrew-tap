@@ -75,14 +75,14 @@ jobs:
           git config --global user.email "${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
       - name: Check out tap
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: formenosland/homebrew-tap
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: true
 
       - name: Set up Homebrew
-        uses: Homebrew/actions/setup-homebrew@a657b8b0cd35d0f65cce41fce9b24cf054b49869 # 2026.08.24.1
+        uses: Homebrew/actions/setup-homebrew@f8d4222eb633e65c2a0157383cf80861fc7fae7f # 2026.09.07.1
         with:
           token: ${{ steps.app-token.outputs.token }}
 
