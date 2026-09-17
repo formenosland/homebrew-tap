@@ -11,12 +11,10 @@ class Skillsync < Formula
     strategy :github_latest
   end
 
-  depends_on "git"
+  depends_on "go" => :build
 
   def install
-    libexec.install "bin", "registry"
-    chmod 0755, libexec/"bin/skillsync"
-    bin.install_symlink libexec/"bin/skillsync"
+    system "go", "build", *std_go_args(ldflags: "-s -w"), "./cmd/skillsync"
   end
 
   def caveats
