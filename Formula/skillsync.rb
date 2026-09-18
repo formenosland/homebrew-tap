@@ -1,8 +1,8 @@
 class Skillsync < Formula
   desc "One skill store for every AI coding agent"
   homepage "https://github.com/formenosland/skillsync"
-  url "https://github.com/formenosland/skillsync/archive/refs/tags/v1.2.1.tar.gz"
-  sha256 "4a6ebdc84e548f1ea01612676c7e63be65de0db640c7adc2056ef0c357f251e7"
+  url "https://github.com/formenosland/skillsync/archive/refs/tags/v1.3.0.tar.gz"
+  sha256 "7f2dfd2058d325b0984bc52cb4198873767ad50a4b1b8c7c073ac6e73a5506ff"
   license "MIT"
   head "https://github.com/formenosland/skillsync.git", branch: "main"
 
